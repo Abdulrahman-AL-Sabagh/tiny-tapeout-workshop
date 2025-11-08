@@ -20,11 +20,11 @@
 
 ###IOSet List 12
 set_io --warn-no-port clk_in 21
-set_io --warn-no-port toggle0 78
-set_io --warn-no-port buttons[0] 79
-set_io --warn-no-port buttons[1] 80
-set_io --warn-no-port buttons[2] 81
-set_io --warn-no-port buttons[3] 87
-set_io --warn-no-port buttons[4] 88
-set_io --warn-no-port buttons[5] 90
+set_io --warn-no-port buttons[0] 78
+set_io --warn-no-port buttons[1] 79
+set_io --warn-no-port buttons[2] 80
+set_io --warn-no-port buttons[3] 81
+set_io --warn-no-port buttons[4] 87
+set_io --warn-no-port buttons[5] 88
+set_io --warn-no-port buttons[6] 90
 set_io --warn-no-port ws_data 91

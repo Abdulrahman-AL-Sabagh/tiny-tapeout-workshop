@@ -5,8 +5,7 @@ module fourConnect(
 	//input reset,
 	//	input reset,
 	input clk_in,
-	input toggle0,
-	input [5:0] buttons,
+	input [6:0] buttons,
 	output ws_data
 );
 reg reset = 1;
@@ -17,15 +16,15 @@ reg reset = 1;
 //reg [1:0] game_state;
 //reg slot_inserted;
 //reg player;
-//reg [23:0] board [0:64-1];
+reg [23:0] board [0:64-1];
 //reg[23:0] color; 
 //reg [7:0] inserted_at; 
-reg[7:0] led_num = 0;
+reg[7:0] led_num = 'bx;
 reg write = 0;
 reg[23:0] color;
 //reg[7:0] counter;
 //reg[7:0] prev_col;
-
+reg[2:0] col_index;
 //wire [6:0] col_select_in;
 localparam EMPTY = 24'h000000;
 localparam WHITE = 24'hFFFFFF; // white is for slots, that are not allowe 
@@ -38,8 +37,15 @@ localparam BOARD_SIZE = 64;
 localparam COLS = 8;
 localparam ROWS = 8;
 
-localparam YELLOW = 24'hFFFF00;
-localparam RED = 24'hFF0000;
+localparam YELLOW = 24'hFF0000;
+localparam RED = 24'h0000FF;
+
+//reg [1:0] write_state = W_SETUP;
+localparam W_IDLE = 2'b11;
+localparam W_DROP = 2'b01;
+localparam S_DISPLAY = 2'b10;
+localparam W_SETUP = 2'b00;
+reg [1:0] write_state = W_SETUP;
 //localparam SETUP = 3'b000;
 //localparam IDLE = 3'b010;
 //localparam INSERTING = 3'b011;
@@ -53,6 +59,8 @@ localparam RED = 24'hFF0000;
 //
 //
 // wire any_button_pressed = |buttons;
+reg [5:0] buttons_prev; 
+wire button_press_event = (buttons != 6'b000000) && (buttons_prev == 6'b000000);
 integer row;
 reg [7:0] insert_at; 
 ws2812 #(.NUM_LEDS(64), .CLK_MHZ(12)) ws2812_inst (
@@ -65,14 +73,65 @@ ws2812 #(.NUM_LEDS(64), .CLK_MHZ(12)) ws2812_inst (
 );
 
 always @(posedge clk_in) begin
+	buttons_prev <= buttons;
+	color <= board[led_num];	
 	reset <= 0;
-	write <= 1'b1;      // Default to not writing
-	if (toggle0 == 1'b0) begin // This is your testing path	
-		led_num <= 8'd0;
-		color <= 24'hFFFF00;
+	write <= 1'b0;      // Default to not writing
+	case (write_state)
+		W_SETUP: begin
+			if (led_num >= 48 || led_num % 7 == 0  ) begin
+				board[led_num] <= WHITE; 
+			end else begin
+				board[color] <= EMPTY;	
+			end	
+			led_num <= led_num + 1;
+			
+			if (led_num >= 64) begin
+				led_num <= 0;
+				write_state <= S_DISPLAY;
+			end
+
+		
+		end
+		W_IDLE: begin 
 		write <= 1'b0;
-		reset <= 0;
+		if (button_press_event) begin
+			write_state <= W_DROP;
+			case (buttons)
+				7'b0000001: col_index <= 3'd0;
+				7'b0000010: col_index <= 3'd1;
+				7'b0000100: col_index <= 3'd2;
+				7'b0001000: col_index <= 3'd3;
+				7'b0010000: col_index <= 3'd4;
+				7'b0100000: col_index <= 3'd5;
+				7'b1000000: col_index <= 3'd6;
+				default: led_num <= led_num;
+			endcase
+		end
+//		if (board[led_num] != EMPTY) begin
+//			led_num <= led_num + 8;
+//		end else if (board[led_num] == EMPTY) begin
+//			board[led_num] <= color;
+//		end
 	end
+	W_DROP: begin
+		//TODO: handle dropping in the right index;
+		write <= 1'b1;
+		write_state <= S_DISPLAY;
+	end
+	S_DISPLAY: begin	
+		write <= 1'b1;
+		led_num <= led_num + 1;
+
+		if (led_num >= 63) begin
+			led_num <= 0;
+		end
+		if (button_press_event) begin
+		write_state <= W_IDLE;
+	end
+	end
+	default: write_state <= W_SETUP;
+	endcase
 end	
 //loop: for (i = 0 + led_num; i < BOARD_SIZE; i = i + 8) begin 
 //               if (board[i] == EMPTY) begin 
