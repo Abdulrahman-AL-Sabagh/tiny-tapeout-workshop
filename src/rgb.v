@@ -1,112 +1,145 @@
-// copied from  https://github.com/ccattuto/tt07-serial-charmatrix/blob/main/src/ws2812b.v
-module ws2812b (
-    input wire clk20,             // 20 MHz input clock
+// https://github.com/mattvenn/ws2812-core/blob/master/ws2812.v
+// copied from the link above
+
+`default_nettype none
+`timescale 1ns/1ns
+
+`ifdef FORMAL
+    `define NO_MEM_RESET 0
+`else
+    `define NO_MEM_RESET 1
+`endif
+
+
+module ws2812 (
+    input wire [23:0] rgb_data,
+    input wire [7:0] led_num,
+    input wire write,
     input wire reset,
-    input wire [23:0] data_in,    // color data
-    input wire valid,
-    input wire latch,
-    output reg ready,
-    output reg led          // output signal to LED strip
+    input wire clk,  //12MHz
+
+    output reg data
 );
+    parameter NUM_LEDS = 8;
+    parameter CLK_MHZ = 10;
+    localparam LED_BITS = $clog2(NUM_LEDS);
 
-  // Define timing parameters according to WS2812B datasheet
-  localparam T0H = 400e-9;       // width of '0' high pulse (400ns)
-  localparam T1H = 800e-9;       // width of '1' high pulse (800ns)
-  localparam T0L = 850e-9;       // width of '0' low pulse (850ns)
-  localparam T1L = 450e-9;       // width of '1' low pulse (450ns)
-  localparam PERIOD = 1250e-9;   // total period of one bit (1250ns)
-  localparam RES_DELAY = 300e-6; // reset duration (300us)
+    /*
+    great information here:
 
-  // Calculate clock cycles needed based on input clock frequency
-  parameter CLOCK_FREQ = 20e6; // 20MHz clock frequency
+    * https://cpldcpu.wordpress.com/2014/01/14/light_ws2812-library-v2-0-part-i-understanding-the-ws2812/
+    * https://github.com/japaric/ws2812b/blob/master/firmware/README.md
 
-  // Calculate clock cycles for each timing parameter
-  localparam [15:0] CYCLES_PERIOD = $floor(CLOCK_FREQ * PERIOD);
-  localparam [15:0] CYCLES_T0H = $floor(CLOCK_FREQ * T0H);
-  localparam [15:0] CYCLES_T1H = $floor(CLOCK_FREQ * T1H);
-  localparam [15:0] CYCLES_T0L = CYCLES_PERIOD - CYCLES_T0H;
-  localparam [15:0] CYCLES_T1L = CYCLES_PERIOD - CYCLES_T1H;
-  localparam [15:0] CYCLES_RESET = $floor(CLOCK_FREQ * RES_DELAY);
+    period 1200ns:
+        * t on  800ns
+        * t off 400ns
 
-  // state machine
-  parameter IDLE = 0, START = 1, SEND_BIT = 2, RESET = 3;
-  reg [1:0] state;
+    end of frame/reset is > 50us. I had a bug at 50us, so increased to 65us
 
-  reg [4:0] bitpos;
-  reg [15:0] time_counter;
-  reg [23:0] data;
-  reg will_latch;
+    More recent ws2812 parts require reset > 280us. See: https://blog.particle.io/2017/05/11/heads-up-ws2812b-neopixels-are-about-to-change/
 
-  // State machine logic
-  always @(posedge clk20) begin
-    if (reset) begin
-      state <= RESET;
-      bitpos <= 0;
-      time_counter <= 0;
-      led <= 0;
-      ready <= 0;
-      data <= 24'b0;
-      will_latch <= 0;
-    end else begin
-      case (state)
-        IDLE: begin
-          bitpos <= 0;
-          time_counter <= 0;
-          led <= 0;
-          if (ready & valid) begin
-            data <= data_in;
-            will_latch <= latch;
-            ready <= 0;
-            state <= START;
-          end else begin
-            ready <= 1;
-          end
-        end
+    clock period at 12MHz = 83ns:
+        * t on  counter = 10, makes t_on  = 833ns
+        * t off counter = 5,  makes t_off = 416ns
+        * reset is 800 counts             = 65us
 
-        START: begin
-          // Initialize for sending data
-          state <= SEND_BIT;
-          bitpos <= 23;
-          time_counter <= 0;
-          led <= 1;
-          ready <= 0;
-        end
+    */
+    parameter t_on = $rtoi($ceil(CLK_MHZ*900/1000));
+    parameter t_off = $rtoi($ceil(CLK_MHZ*350/1000));
+    parameter t_reset = $rtoi($ceil(CLK_MHZ*280));
+    localparam t_period = $rtoi($ceil(CLK_MHZ*1250/1000));
 
-        SEND_BIT: begin
-          if (time_counter < CYCLES_PERIOD - 1) begin
-            // Continue sending current bit
-            time_counter <= time_counter + 1;
-            if (time_counter == (data[bitpos] ? CYCLES_T1H - 1 : CYCLES_T0H - 1))
-                led <= 0;
-          end else if (bitpos > 0) begin
-            // Move to next bit
-            bitpos <= bitpos - 1;
-            time_counter <= 0;
-            led <= 1;
-          end else begin
-            // All bits sent
-            state <= will_latch ? RESET : IDLE;
-            will_latch <= 0;
-            time_counter <= 0;
-            led <= 0;
-          end
-        end
+    localparam COUNT_BITS = $clog2(t_reset);
 
-        RESET: begin
-          if (time_counter < CYCLES_RESET) begin
-            // Continue reset pulse
-            time_counter <= time_counter + 1;
-          end else begin
-            // Reset complete, return to idle
-            state <= IDLE;
-          end
-        end
+    reg [23:0] led_reg [NUM_LEDS-1:0];
 
-        default: begin
-          state <= RESET;
-        end
-      endcase
+    reg [LED_BITS-1:0] led_counter;
+    reg [COUNT_BITS-1:0] bit_counter;
+    reg [4:0] rgb_counter;
+
+    localparam STATE_DATA  = 0;
+    localparam STATE_RESET = 1;
+
+    reg [1:0] state;
+
+    reg [23:0] led_color;
+
+    // handle reading new led data
+    always @(posedge clk) begin
+        if(write)
+            led_reg[led_num] <= rgb_data;
+        led_color <= led_reg[led_counter];
     end
-  end
 
+    integer i;
+
+    always @(posedge clk)
+        // reset
+        if(reset) begin
+	    //  In order to infer BRAM, can't have a reset condition
+	    //  like this. But it will fail formal if you don't reset
+	    //  it.
+            `ifdef NO_MEM_RESET
+	    //  $display("Bypassing memory reset to allow BRAM");
+	    `else
+            // initialise led data to 0
+            for (i=0; i<NUM_LEDS; i=i+1)
+                led_reg[i] <= 0;
+	    `endif
+
+            state <= STATE_RESET;
+            bit_counter <= t_reset;
+            rgb_counter <= 23;
+            led_counter <= NUM_LEDS - 1;
+            data <= 0;
+
+        // state machine to generate the data output
+        end else case(state)
+
+            STATE_RESET: begin
+                // register the input values
+                rgb_counter <= 5'd23;
+                led_counter <= NUM_LEDS - 1;
+                data <= 0;
+
+                bit_counter <= bit_counter - 1;
+
+                if(bit_counter == 0) begin
+                    state <= STATE_DATA;
+                    bit_counter <= t_period;
+                end
+            end
+
+            STATE_DATA: begin
+                // output the data
+                if(led_color[rgb_counter])
+                    data <= bit_counter > (t_period - t_on);
+                else
+                    data <= bit_counter > (t_period - t_off);
+
+                // count the period
+                bit_counter <= bit_counter - 1;
+
+                // after each bit, increment rgb counter
+                if(bit_counter == 0) begin
+                    bit_counter <= t_period;
+                    rgb_counter <= rgb_counter - 1;
+
+                    if(rgb_counter == 0) begin
+                        led_counter <= led_counter - 1;
+                        bit_counter <= t_period;
+                        rgb_counter <= 23;
+
+                        if(led_counter == 0) begin
+                            state <= STATE_RESET;
+                            led_counter <= NUM_LEDS - 1;
+                            bit_counter <= t_reset;
+                        end
+                    end
+                end 
+            end
+
+        endcase
+    
 endmodule
+`default_nettype wire

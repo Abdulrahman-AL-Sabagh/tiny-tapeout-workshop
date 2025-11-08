@@ -1,0 +1,195 @@
+// `include "rgb.v"
+module matrix(
+    input   clk,
+    input  reset,
+    input [2:0] col,
+    output reg led,
+    output ws_data
+    
+);
+reg is_gameover;
+reg [1:0] game_state;
+reg slot_inserted;
+reg player;
+reg [23:0] board [63:0];
+reg[23:0] color; 
+reg [7:0] inserted_at; 
+reg[7:0] led_num;
+reg write;
+reg[23:0] external_rgb_data;
+reg[7:0] counter;
+reg[2:0] prev_col;
+//initial begin
+//    game_state = 0;
+//    player = 0;
+//    color = 24'hFF0000;
+//    external_rgb_data <= 24'h000000;
+//    reset = 0;
+//    led_num = 0;
+//    counter = 0;
+//    write = 0;
+//    inserted_at = 'bx;
+   // for (integer i = 0; i < 42; i = i + 1) begin
+    //    board[i] = 24'h00_00_00;
+   // end
+// end; 
+// genvar r;
+// genvar c;
+integer row;
+integer column;
+
+localparam SETUP = 3'b000;
+localparam RESETING = 3'b001;
+localparam IDLE = 3'b010;
+localparam INSERTING = 3'b011;
+localparam CHECKING = 3'b100;
+localparam GAME_OVER = 3'b101;
+
+reg [2:0]State = SETUP;
+
+localparam EMPTY = 24'h000;
+localparam WHITE = 24'hFFF; // white is for slots, that are not allowe 
+
+reg [5:0] setup_counter;
+ws2812 #(.NUM_LEDS(64)) ws2812_inst (
+    .rgb_data(external_rgb_data), // Connect external RGB data
+    .led_num(led_num),
+    .write(write),
+    .reset(reset),
+    .clk(clk),
+    .data(ws_data)
+);
+
+   
+
+
+always @(posedge clk) begin
+   if (reset == 1) begin
+   	State <= RESETING; 
+   end
+   prev_col <= col;
+    color <= (player == 0) ? 24'hFF0000 : 24'h0000FF;
+    slot_inserted <= 1'b0;
+    write <= 1'b0;
+    inserted_at <= 'bx;
+
+
+case(State)
+	SETUP: begin
+		
+		if (setup_counter != 0 && setup_counter % 8 == 0) begin
+			board[setup_counter] <= WHITE;
+		end else begin
+			board[setup_counter] <= EMPTY;
+		end
+                setup_counter <= setup_counter + 1;
+			
+		if (setup_counter >= 63) begin
+		State <= IDLE;
+		end
+	end
+	INSERTING: begin
+//		slot_inserted <= 1'b0;
+	// TODO: HANDLE INSERT LOGIC HERE
+//	for (row = 0; row < 6; row = row + 1) begin
+//		inserted_at <= row * 7 + col;
+//		if (board[inserted_at] == EMPTY && slot_inserted != 1'b1) begin
+//			slot_inserted <= 1'b1;
+//			counter <= counter + 1;
+//		end
+//	end
+		
+			State <= CHECKING;
+	end
+
+	CHECKING: begin
+	//TODO: CHECK ROWS
+	   if (counter == 42) begin
+	   	State <= GAME_OVER;
+	   end
+	    State <= IDLE;
+	end
+
+	GAME_OVER: begin
+		setup_counter <= 0;
+		counter <= 0;
+		is_gameover <= 1'b0;
+		player <= 1'b0;
+		State <= SETUP;
+	end
+
+	RESETING: begin
+		setup_counter <= 0;
+		counter <= 0;
+		is_gameover <= 1'b0;
+		player <= 1'b0;
+		State <= SETUP;
+
+
+		State <= SETUP;
+	end
+
+	IDLE: begin
+		if (col == prev_col) begin
+		State <= IDLE;
+		end else begin
+		State <= INSERTING;
+		end
+	end
+	default: State <= SETUP;
+endcase
+end
+
+//for (row = 0; row < 6; row = row + 1) 
+//    if (board[row * 7 + col] == 24'h00_00_00 && !slot_inserted)  begin
+ //       slot_inserted <= 1'b1;
+ //       write <= 1;
+  //      inserted_at <= row * 7 + col;
+  //      counter <= counter  + 1;
+  //      board[inserted_at] <= color;
+  //     led_num <= inserted_at;
+  //      external_rgb_data <= color;
+  //      player <= !player;
+   //     slot_inserted <= 1'b0;
+   // end
+
+// GAME OVER CHECKS
+//for (row = 0; row < 6; row = row + 1 ) 
+//    for (column = 0; column < 7; column = column + 1 ) 
+        // VERTICAL CHECK
+//        if (row < 3) begin
+//            is_gameover <= (
+//                    board[row * 7 + column] == color &&
+//                    board[(row + 1) * 7 + column] == color &&
+//                    board[(row + 2) * 7 + column] == color &&
+ //                   board[(row + 3) * 7 + column] == color 
+   //             );
+        // HORIZONTAL CHECKS
+
+     //   end else if (column < 4) begin
+       //   is_gameover <=  (
+         //           board[row * 7 + column] == color &&
+           //         board[row * 7 + column + 1] == color &&
+             //       board[row * 7 + column + 2] == color &&
+               //     board[row * 7 + column + 3] == color 
+               // );
+         
+
+        // RIGHT_DIAGONAL CHECKS
+      //  end else if (row < 3 && column < 4 ) begin
+       //     is_gameover <= (
+        //            board[row * 7 + column] == color &&
+         //           board[(row+1) * 7 + column + 1] == color &&
+          //          board[(row+2) * 7 + column + 2] == color &&
+           //         board[(row+3) * 7 + column + 3] == color 
+           //     );
+       // end else if ( 6 - row >= 2 && 7 - col >= 3 ) begin
+        //    is_gameover  <= (
+         //           board[row * 7 + column] == color &&
+          //          board[(row-1) * 7 + column + 1] == color &&
+           //         board[(row-2 )* 7 + column + 2] == color &&
+            //        board[(row-3) * 7 + column  + 3] == color 
+             //   );
+     //   end
+
+endmodule
